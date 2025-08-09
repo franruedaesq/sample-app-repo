@@ -77,4 +77,4 @@ jobs:
           image_vulns_critical_total ${{ env.image_vulns_critical_total }}
           EOF
         # This step will only run if the secret is set
-        if: ${{ secrets.PUSHGATEWAY_URL != '' }}
+        if: secrets.PUSHGATEWAY_URL != ''

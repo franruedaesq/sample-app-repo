@@ -61,14 +61,16 @@ jobs:
           echo "Metrics calculated: Duration=${duration}s, Failed Tests=${failed_tests}, Critical Vulns=${critical_vulns}"
 
       - name: Push Metrics to Pushgateway
+        if: ${{ secrets.PUSHGATEWAY_URL != '' }}
+        env:
+          PUSHGATEWAY_URL: ${{ secrets.PUSHGATEWAY_URL }}
         run: |
-          # The job name for Prometheus
           job_name="ci_build"
-          # Unique identifier for this specific run
-          instance_name="${{ github.repository }}/${{ github.run_id }}"
+          # Construir un instance_name seguro (sin "/")
+          instance_name="${{ github.repository }}-${{ github.run_id }}"
+          instance_name="${instance_name//\//_}"
 
-          # Prepare the metrics payload in Prometheus text format
-          cat <<EOF | curl --data-binary @- ${{ secrets.PUSHGATEWAY_URL }}/metrics/job/${job_name}/instance/${instance_name}
+          cat <<EOF | curl --fail --data-binary @- "$PUSHGATEWAY_URL/metrics/job/${job_name}/instance/${instance_name}"
           # TYPE ci_build_duration_seconds gauge
           ci_build_duration_seconds ${{ env.ci_build_duration_seconds }}
           # TYPE ci_tests_failed_total gauge
@@ -76,4 +78,3 @@ jobs:
           # TYPE image_vulns_critical_total gauge
           image_vulns_critical_total ${{ env.image_vulns_critical_total }}
           EOF
-        if: secrets.PUSHGATEWAY_URL

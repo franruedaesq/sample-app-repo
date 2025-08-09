@@ -63,7 +63,7 @@ jobs:
 
           # Vulnerabilidades críticas del scan (si no hay archivo/campo, 0)
           if [ -f "$SEC_FILE" ]; then
-            critical_vulns=$(jq -r 'try .summary.critical // 0 catch 0' "$SEC_FILE")
+            critical_vulns=$(jq -r '.summary.critical // 0' "$SEC_FILE")
           else
             critical_vulns=0
           fi

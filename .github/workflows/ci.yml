@@ -81,12 +81,11 @@ jobs:
           if-no-files-found: ignore
 
       - name: Push Metrics to Pushgateway
-        if: ${{ !!secrets.PUSHGATEWAY_URL }}
         env:
           PUSHGATEWAY_URL: ${{ secrets.PUSHGATEWAY_URL }}
+        if: ${{ env.PUSHGATEWAY_URL != '' }}
         run: |
           job_name="ci_build"
-          # Evitar "/" en el instance para que no rompa el path
           instance_name="${{ github.repository }}-${{ github.run_id }}"
           instance_name="${instance_name//\//_}"
 

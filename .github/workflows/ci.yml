@@ -32,9 +32,6 @@ jobs:
         continue-on-error: true
         run: npm test
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
       - name: Archive reports
         uses: actions/upload-artifact@v4
         with:

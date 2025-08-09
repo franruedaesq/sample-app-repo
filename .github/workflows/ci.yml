@@ -26,11 +26,50 @@ jobs:
         run: npm install
 
       - name: Run security scan
-        run: npm run scan
+        run: |
+          mkdir -p reports
+          # Asegúrate de que tu script genere reports/security-report.json
+          npm run scan
 
       - name: Run tests
         continue-on-error: true
-        run: npm test
+        run: |
+          mkdir -p reports
+          # Asegúrate de que tu runner de tests genere reports/junit.xml
+          npm test
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Calculate Metrics
+        id: calculate_metrics
+        env:
+          JUNIT_FILE: reports/junit.xml
+          SEC_FILE: reports/security-report.json
+        run: |
+          # Duración del build
+          end_unix=$(date +%s)
+          start_unix="${{ steps.start_time.outputs.start_unix }}"
+          duration=$((end_unix - start_unix))
+          echo "ci_build_duration_seconds=$duration" >> $GITHUB_ENV
+
+          # Fallos de test (si no hay archivo, 0)
+          if [ -f "$JUNIT_FILE" ]; then
+            failed_tests=$(grep -o 'failures="[0-9]*"' "$JUNIT_FILE" | grep -o '[0-9]*' | head -n 1 || echo 0)
+          else
+            failed_tests=0
+          fi
+          echo "ci_tests_failed_total=$failed_tests" >> $GITHUB_ENV
+
+          # Vulnerabilidades críticas del scan (si no hay archivo/campo, 0)
+          if [ -f "$SEC_FILE" ]; then
+            critical_vulns=$(jq -r 'try .summary.critical // 0 catch 0' "$SEC_FILE")
+          else
+            critical_vulns=0
+          fi
+          echo "image_vulns_critical_total=$critical_vulns" >> $GITHUB_ENV
+
+          echo "Metrics calculated: Duration=${duration}s, Failed Tests=${failed_tests}, Critical Vulns=${critical_vulns}"
 
       - name: Archive reports
         uses: actions/upload-artifact@v4
@@ -39,38 +78,20 @@ jobs:
           path: |
             reports/junit.xml
             reports/security-report.json
-
-      - name: Calculate Metrics
-        id: calculate_metrics
-        run: |
-          # Calculate build duration
-          end_unix=$(date +%s)
-          start_unix=${{ steps.start_time.outputs.start_unix }}
-          duration=$((end_unix - start_unix))
-          echo "ci_build_duration_seconds=$duration" >> $GITHUB_ENV
-
-          # Extract failed test count from JUnit report
-          # This command looks for the 'failures' attribute in the <testsuites> tag
-          failed_tests=$(grep -o 'failures="[0-9]*"' reports/junit.xml | grep -o '[0-9]*' | head -n 1 || echo 0)
-          echo "ci_tests_failed_total=$failed_tests" >> $GITHUB_ENV
-
-          # Extract critical vulnerability count from security report using jq
-          critical_vulns=$(jq '.summary.critical // 0' reports/security-report.json)
-          echo "image_vulns_critical_total=$critical_vulns" >> $GITHUB_ENV
-
-          echo "Metrics calculated: Duration=${duration}s, Failed Tests=${failed_tests}, Critical Vulns=${critical_vulns}"
+          if-no-files-found: ignore
 
       - name: Push Metrics to Pushgateway
-        if: ${{ secrets.PUSHGATEWAY_URL != '' }}
+        if: ${{ !!secrets.PUSHGATEWAY_URL }}
         env:
           PUSHGATEWAY_URL: ${{ secrets.PUSHGATEWAY_URL }}
         run: |
           job_name="ci_build"
-          # Construir un instance_name seguro (sin "/")
+          # Evitar "/" en el instance para que no rompa el path
           instance_name="${{ github.repository }}-${{ github.run_id }}"
           instance_name="${instance_name//\//_}"
 
-          cat <<EOF | curl --fail --data-binary @- "$PUSHGATEWAY_URL/metrics/job/${job_name}/instance/${instance_name}"
+          cat <<EOF | curl -sS --fail --retry 2 -m 10 --data-binary @- \
+            "${PUSHGATEWAY_URL}/metrics/job/${job_name}/instance/${instance_name}"
           # TYPE ci_build_duration_seconds gauge
           ci_build_duration_seconds ${{ env.ci_build_duration_seconds }}
           # TYPE ci_tests_failed_total gauge

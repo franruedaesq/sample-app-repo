@@ -76,5 +76,4 @@ jobs:
           # TYPE image_vulns_critical_total gauge
           image_vulns_critical_total ${{ env.image_vulns_critical_total }}
           EOF
-        # This is the corrected line
-        if: secrets.PUSHGATEWAY_URL != ''
+        if: secrets.PUSHGATEWAY_URL

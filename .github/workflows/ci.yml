@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Record Start Time
+        id: start_time
+        run: echo "start_unix=$(date +%s)" >> $GITHUB_OUTPUT
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -35,3 +39,42 @@ jobs:
           path: |
             reports/junit.xml
             reports/security-report.json
+
+      - name: Calculate Metrics
+        id: calculate_metrics
+        run: |
+          # Calculate build duration
+          end_unix=$(date +%s)
+          start_unix=${{ steps.start_time.outputs.start_unix }}
+          duration=$((end_unix - start_unix))
+          echo "ci_build_duration_seconds=$duration" >> $GITHUB_ENV
+
+          # Extract failed test count from JUnit report
+          # This command looks for the 'failures' attribute in the <testsuites> tag
+          failed_tests=$(grep -o 'failures="[0-9]*"' reports/junit.xml | grep -o '[0-9]*' | head -n 1 || echo 0)
+          echo "ci_tests_failed_total=$failed_tests" >> $GITHUB_ENV
+
+          # Extract critical vulnerability count from security report using jq
+          critical_vulns=$(jq '.summary.critical // 0' reports/security-report.json)
+          echo "image_vulns_critical_total=$critical_vulns" >> $GITHUB_ENV
+
+          echo "Metrics calculated: Duration=${duration}s, Failed Tests=${failed_tests}, Critical Vulns=${critical_vulns}"
+
+      - name: Push Metrics to Pushgateway
+        run: |
+          # The job name for Prometheus
+          job_name="ci_build"
+          # Unique identifier for this specific run
+          instance_name="${{ github.repository }}/${{ github.run_id }}"
+
+          # Prepare the metrics payload in Prometheus text format
+          cat <<EOF | curl --data-binary @- ${{ secrets.PUSHGATEWAY_URL }}/metrics/job/${job_name}/instance/${instance_name}
+          # TYPE ci_build_duration_seconds gauge
+          ci_build_duration_seconds ${{ env.ci_build_duration_seconds }}
+          # TYPE ci_tests_failed_total gauge
+          ci_tests_failed_total ${{ env.ci_tests_failed_total }}
+          # TYPE image_vulns_critical_total gauge
+          image_vulns_critical_total ${{ env.image_vulns_critical_total }}
+          EOF
+        # This step will only run if the secret is set
+        if: ${{ secrets.PUSHGATEWAY_URL != '' }}
